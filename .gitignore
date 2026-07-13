@@ -86,3 +86,14 @@ config.local.h
 # --- Documentation build ---
 docs/_build/
 site/
+
+# --- Blender backups ---
+*.blend1
+*.blend2
+*.blend3
+*.blend4
+*.blend5
+*.blend6
+*.blend7
+*.blend8
+*.blend9
