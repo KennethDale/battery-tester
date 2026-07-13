@@ -15,19 +15,19 @@ def test_channel_status_from_dict() -> None:
     s = ChannelStatus.from_dict(
         {
             "channel": 2,
-            "state": "discharging",
+            "state": "logging",
             "voltage": "3.742",
-            "current": "0.501",
-            "capacity_mah": "123.4",
-            "elapsed_s": "600",
+            "current": "0.520",
+            "capacity_mah": "10.8",
+            "elapsed_s": "75",
         }
     )
     assert s.channel == 2
-    assert s.state == "discharging"
+    assert s.state == "logging"
     assert abs(s.voltage - 3.742) < 1e-9
-    assert abs(s.current - 0.501) < 1e-9
-    assert abs(s.capacity_mah - 123.4) < 1e-9
-    assert s.elapsed_s == 600
+    assert abs(s.current - 0.520) < 1e-9
+    assert abs(s.capacity_mah - 10.8) < 1e-9
+    assert s.elapsed_s == 75
 
 
 def test_channel_status_defaults_missing_fields() -> None:
@@ -46,9 +46,14 @@ def test_fixture_csv_is_parseable() -> None:
     reader = csv.DictReader(io.StringIO(text))
     rows = list(reader)
     assert reader.fieldnames == ["elapsed_s", "voltage", "current_a"]
-    assert len(rows) == 12
-    # First row is the start-of-test sample (no current yet).
-    assert float(rows[0]["current_a"]) == 0.0
-    # Discharge ramps the voltage down over time.
+    assert len(rows) == 16
+    # First row has the battery freshly connected and load drawing current.
+    assert float(rows[0]["voltage"]) > 4.0
+    assert float(rows[0]["current_a"]) > 0.4
+    # Last row: BMS has cut off — voltage low, current zero.
+    assert float(rows[-1]["voltage"]) < 3.0
+    assert float(rows[-1]["current_a"]) == 0.0
+    # Voltage monotonically decreases as the cell discharges.
     voltages = [float(r["voltage"]) for r in rows]
-    assert voltages[-1] < voltages[0]
+    for prev, cur in zip(voltages, voltages[1:]):
+        assert cur <= prev + 0.001  # allow tiny measurement noise

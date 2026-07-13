@@ -2,66 +2,34 @@
 
 const char* channelStateToString(ChannelState s) {
     switch (s) {
-        case ChannelState::IDLE:        return "idle";
-        case ChannelState::CHARGING:    return "charging";
-        case ChannelState::DISCHARGING: return "discharging";
-        case ChannelState::COMPLETE:    return "complete";
-        case ChannelState::FAULT:       return "fault";
-        default:                        return "unknown";
+        case ChannelState::WAITING:  return "waiting";
+        case ChannelState::LOGGING:  return "logging";
+        case ChannelState::COMPLETE: return "complete";
+        default:                     return "unknown";
     }
 }
 
-BatteryChannel::BatteryChannel(uint8_t index,
-                               uint8_t adcPin,
-                               uint8_t chargePin,
-                               uint8_t dischargePin,
-                               uint8_t loadEnablePin)
-    : _index(index),
-      _adcPin(adcPin),
-      _chargePin(chargePin),
-      _dischargePin(dischargePin),
-      _loadEnablePin(loadEnablePin) {}
+BatteryChannel::BatteryChannel(uint8_t index, uint8_t i2cAddress)
+    : _index(index), _ina(i2cAddress) {}
 
-void BatteryChannel::begin() {
-    pinMode(_chargePin, OUTPUT);
-    pinMode(_dischargePin, OUTPUT);
-    pinMode(_loadEnablePin, OUTPUT);
-    setOutputs(false, false);
+bool BatteryChannel::begin() {
+    if (!_ina.begin()) {
+        Serial.printf("[ch%u] INA219 not found\n", _index);
+        return false;
+    }
+    // Use the default 32V/2A calibration; sufficient for battery logging.
+    _ina.setCalibration_32V_2A();
+    Serial.printf("[ch%u] INA219 ready\n", _index);
 
-    _state = ChannelState::IDLE;
+    _state = ChannelState::WAITING;
     _lastVoltage = 0.0f;
     _lastCurrent = 0.0f;
     _capacityMah = 0.0f;
     _elapsedSeconds = 0;
-    _lastUpdateMs = millis();
+    _lastSampleMs = millis();
     _historyCount = 0;
     _historyHead = 0;
-}
-
-float BatteryChannel::readVoltage() {
-    // Average a few readings to reduce noise.
-    uint32_t sum = 0;
-    const uint8_t samples = 8;
-    for (uint8_t i = 0; i < samples; ++i) {
-        sum += analogRead(_adcPin);
-        delayMicroseconds(200);
-    }
-    float adc = static_cast<float>(sum) / samples;
-    return (adc / ADC_MAX) * ADC_REFERENCE_V * VOLTAGE_DIVIDER_RATIO;
-}
-
-float BatteryChannel::readCurrent() {
-    // Placeholder until a current-sense front-end is wired in.
-    // A real implementation would read from a dedicated current-sense ADC
-    // (e.g. INA219) and convert to amps. For now we report a nominal value
-    // derived from the configured discharge target when the load is active.
-    if (_state == ChannelState::DISCHARGING) {
-        return DISCHARGE_CURRENT_MA / 1000.0f;
-    }
-    if (_state == ChannelState::CHARGING) {
-        return DISCHARGE_CURRENT_MA / 1000.0f;  // symmetric default
-    }
-    return 0.0f;
+    return true;
 }
 
 void BatteryChannel::pushSample(float v, float a) {
@@ -72,82 +40,68 @@ void BatteryChannel::pushSample(float v, float a) {
     if (_historyCount < HISTORY_LENGTH) ++_historyCount;
 }
 
-void BatteryChannel::setOutputs(bool charge, bool discharge) {
-    digitalWrite(_chargePin, charge ? HIGH : LOW);
-    digitalWrite(_dischargePin, discharge ? HIGH : LOW);
-    digitalWrite(_loadEnablePin, (charge || discharge) ? HIGH : LOW);
-}
-
-void BatteryChannel::enterFault() {
-    _state = ChannelState::FAULT;
-    setOutputs(false, false);
-}
-
-void BatteryChannel::startCharge() {
-    _elapsedSeconds = 0;
+void BatteryChannel::reset() {
+    _state = ChannelState::WAITING;
+    _lastVoltage = 0.0f;
+    _lastCurrent = 0.0f;
     _capacityMah = 0.0f;
+    _elapsedSeconds = 0;
+    _lastSampleMs = millis();
     _historyCount = 0;
     _historyHead = 0;
-    _state = ChannelState::CHARGING;
-    setOutputs(true, false);
-}
-
-void BatteryChannel::startDischarge() {
-    _elapsedSeconds = 0;
-    _capacityMah = 0.0f;
-    _historyCount = 0;
-    _historyHead = 0;
-    _state = ChannelState::DISCHARGING;
-    setOutputs(false, true);
-}
-
-void BatteryChannel::stop() {
-    _state = ChannelState::IDLE;
-    setOutputs(false, false);
 }
 
 void BatteryChannel::update() {
-    unsigned long now = millis();
-    float dtSec = static_cast<float>(now - _lastUpdateMs) / 1000.0f;
-    _lastUpdateMs = now;
+    // Read raw values from the INA219.
+    float v = _ina.getBusVoltage_V();            // Vin- to GND (battery +)
+    float shuntV = _ina.getShuntVoltage_mV() / 1000.0f;  // V across shunt
+    // Current = V_shunt / R_shunt. Positive when the load is drawing.
+    float a = shuntV / SHUNT_OHMS;
 
-    float v = readVoltage();
-    float a = readCurrent();
     _lastVoltage = v;
     _lastCurrent = a;
 
-    // Integrate capacity (mAh) during active discharge/charge.
-    if (_state == ChannelState::CHARGING || _state == ChannelState::DISCHARGING) {
-        _elapsedSeconds += static_cast<unsigned long>(dtSec + 0.5f);
-        _capacityMah += (a * 1000.0f) * (dtSec / 3600.0f);
-    }
+    // Elapsed time since last sample (seconds)
+    unsigned long now = millis();
+    float dtSec = static_cast<float>(now - _lastSampleMs) / 1000.0f;
+    _lastSampleMs = now;
 
-    // State-machine safety / completion logic.
     switch (_state) {
-        case ChannelState::CHARGING:
-            if (v >= 4.20f) {
-                _state = ChannelState::COMPLETE;
-                setOutputs(false, false);
+        case ChannelState::WAITING:
+            // Auto-detect battery connection.
+            if (v > CONNECT_THRESHOLD_V) {
+                _state = ChannelState::LOGGING;
+                _elapsedSeconds = 0;
+                _capacityMah = 0.0f;
+                _historyCount = 0;
+                _historyHead = 0;
+                Serial.printf("[ch%u] battery connected (%.2fV), logging\n", _index, v);
             }
             break;
-        case ChannelState::DISCHARGING:
-            if (v <= DISCHARGE_CUTOFF_V) {
+
+        case ChannelState::LOGGING:
+            _elapsedSeconds += static_cast<unsigned long>(dtSec + 0.5f);
+            // Integrate capacity (mAh). Only count when current is flowing
+            // (negative shunt => current flowing out to the load).
+            _capacityMah += (a > 0 ? a : -a) * 1000.0f * (dtSec / 3600.0f);
+
+            // Auto-detect BMS disconnect / cutoff.
+            if (v < DISCONNECT_THRESHOLD_V) {
                 _state = ChannelState::COMPLETE;
-                setOutputs(false, false);
+                Serial.printf("[ch%u] battery disconnected (%.2fV), capacity=%.1f mAh\n",
+                              _index, v, _capacityMah);
             }
             break;
-        default:
+
+        case ChannelState::COMPLETE:
+            // Stay frozen until manually reset. No more accumulation.
             break;
     }
 
-    // Safety: any clearly out-of-range voltage (e.g. no cell present => 0V
-    // reading during an active test) is treated as a fault.
-    if ((_state == ChannelState::CHARGING || _state == ChannelState::DISCHARGING) &&
-        (v > 4.50f || v < 0.50f)) {
-        enterFault();
+    // Record samples whenever we're active or just finished.
+    if (_state != ChannelState::WAITING) {
+        pushSample(v, a);
     }
-
-    pushSample(v, a);
 }
 
 void BatteryChannel::serializeLatest(String& out) const {

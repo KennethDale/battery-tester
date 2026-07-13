@@ -1,15 +1,18 @@
 // ---------------------------------------------------------------------------
-// 5-Channel Battery Tester - main firmware entry point
+// 5-Channel Passive Battery Capacity Logger
 // Target: ESP8266 (NodeMCU 1.0 / Wemos D1 R2)
 //
-// This firmware:
-//   * samples voltage/current on 5 channels through an analog mux,
-//   * drives charge/discharge MOSFETs to run a per-cell test,
-//   * exposes a JSON + CSV HTTP API and serves a web UI from LittleFS,
-//   * prints status lines to Serial for the optional Python companion.
+// Each channel reads voltage/current from an INA219 sensor over I2C. A
+// pre-charged battery with a fixed load attached is connected to each
+// INA219. The logger:
+//   * auto-detects when a battery is connected,
+//   * logs voltage, current, and accumulated capacity every 5 seconds,
+//   * stops when the BMS disconnects the battery (auto-detect),
+//   * serves a simple web UI showing final capacity per channel.
 // ---------------------------------------------------------------------------
 
 #include <Arduino.h>
+#include <Wire.h>
 #include <LittleFS.h>
 #include <ESP8266mDNS.h>
 
@@ -18,61 +21,31 @@
 #include "WebServer.h"
 #include "WifiManager.h"
 
-// --- Pin map ---------------------------------------------------------------
-// The ESP8266 exposes a single ADC pin (A0). 5 channels share it through an
-// analog multiplexer (e.g. CD4051/CD4052). The mux select lines D1..D3 pick
-// the active channel. A dedicated ADC (e.g. ADS1115 via I2C) is recommended
-// for production; this scaffold keeps the mapping in one place.
-//
-// CHARGE_PIN / DISCHARGE_PIN / LOAD_ENABLE_PIN below are example mappings to
-// GPIOs wired to gate drivers. Adjust to match your hardware.
-static const uint8_t MUX_SELECT_PINS[3] = {D1, D2, D3};
-static const uint8_t SHARED_ADC_PIN      = A0;
-
-static const uint8_t CHARGE_PINS[NUM_CHANNELS]      = {D5, D6, D7, D8, D0};  // gate enables
-static const uint8_t DISCHARGE_PINS[NUM_CHANNELS]   = {D5, D6, D7, D8, D0};  // shared example
-static const uint8_t LOAD_ENABLE_PINS[NUM_CHANNELS] = {D4, D4, D4, D4, D4};  // global enable
+// --- I2C / INA219 setup ----------------------------------------------------
+// ESP8266 default I2C: SCL=D1(GPIO5), SDA=D2(GPIO4). Each INA219 breakout
+// needs a unique address set via its A0/A1 solder jumpers (0x40..0x4F).
+static const uint8_t INA_ADDRESSES[NUM_CHANNELS] = INA219_ADDRESSES;
 
 // --- Globals ---------------------------------------------------------------
 BatteryChannel channels[NUM_CHANNELS] = {
-    BatteryChannel(0, SHARED_ADC_PIN, CHARGE_PINS[0], DISCHARGE_PINS[0], LOAD_ENABLE_PINS[0]),
-    BatteryChannel(1, SHARED_ADC_PIN, CHARGE_PINS[1], DISCHARGE_PINS[1], LOAD_ENABLE_PINS[1]),
-    BatteryChannel(2, SHARED_ADC_PIN, CHARGE_PINS[2], DISCHARGE_PINS[2], LOAD_ENABLE_PINS[2]),
-    BatteryChannel(3, SHARED_ADC_PIN, CHARGE_PINS[3], DISCHARGE_PINS[3], LOAD_ENABLE_PINS[3]),
-    BatteryChannel(4, SHARED_ADC_PIN, CHARGE_PINS[4], DISCHARGE_PINS[4], LOAD_ENABLE_PINS[4]),
+    BatteryChannel(0, INA_ADDRESSES[0]),
+    BatteryChannel(1, INA_ADDRESSES[1]),
+    BatteryChannel(2, INA_ADDRESSES[2]),
+    BatteryChannel(3, INA_ADDRESSES[3]),
+    BatteryChannel(4, INA_ADDRESSES[4]),
 };
 BatteryWebServer webServer(channels, NUM_CHANNELS);
-
-// --- Helpers ---------------------------------------------------------------
-static void selectMuxChannel(uint8_t ch) {
-    // 3 select lines -> up to 8 inputs; we use the low 3 bits of `ch`.
-    digitalWrite(MUX_SELECT_PINS[0], bitRead(ch, 0));
-    digitalWrite(MUX_SELECT_PINS[1], bitRead(ch, 1));
-    digitalWrite(MUX_SELECT_PINS[2], bitRead(ch, 2));
-}
-
-// One pass of the per-channel control loop.
-static void runChannelTick() {
-    static uint8_t activeChannel = 0;
-    // Round-robin: pick one channel per tick to give the ADC settle time.
-    selectMuxChannel(activeChannel);
-    // Minimal settle delay; tune for your mux + divider impedance.
-    delayMicroseconds(500);
-    channels[activeChannel].update();
-    activeChannel = (activeChannel + 1) % NUM_CHANNELS;
-}
 
 // --- setup / loop ----------------------------------------------------------
 void setup() {
     Serial.begin(BAUD_RATE);
     delay(100);
     Serial.println();
-    Serial.println(F("[boot] battery tester starting"));
+    Serial.println(F("[boot] battery logger starting"));
 
-    // Mux select pins as outputs
-    for (uint8_t i = 0; i < 3; ++i) {
-        pinMode(MUX_SELECT_PINS[i], OUTPUT);
-    }
+    // I2C for the INA219 sensors
+    Wire.begin();
+    Serial.println(F("[boot] I2C started"));
 
     // Mount LittleFS (web UI assets)
     if (!LittleFS.begin()) {
@@ -81,15 +54,20 @@ void setup() {
         Serial.println(F("[boot] LittleFS mounted"));
     }
 
+    // Initialize each INA219
+    uint8_t found = 0;
     for (uint8_t i = 0; i < NUM_CHANNELS; ++i) {
-        channels[i].begin();
+        if (channels[i].begin()) {
+            ++found;
+        }
     }
+    Serial.printf("[boot] %u/%u INA219 sensors found\n", found, NUM_CHANNELS);
 
     connectWifi();
 
-    if (MDNS.begin("batterytester")) {
+    if (MDNS.begin("batterylogger")) {
         MDNS.addService("http", "tcp", 80);
-        Serial.println(F("[boot] mDNS: http://batterytester.local"));
+        Serial.println(F("[boot] mDNS: http://batterylogger.local"));
     }
 
     webServer.begin();
@@ -100,9 +78,12 @@ void loop() {
     static unsigned long lastTick = 0;
     unsigned long now = millis();
 
-    if (now - lastTick >= LOOP_INTERVAL_MS) {
+    // Sample every channel at the configured interval
+    if (now - lastTick >= LOG_INTERVAL_MS) {
         lastTick = now;
-        runChannelTick();
+        for (uint8_t i = 0; i < NUM_CHANNELS; ++i) {
+            channels[i].update();
+        }
     }
 
     webServer.loop();

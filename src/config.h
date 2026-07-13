@@ -2,7 +2,7 @@
 #define BATTERY_TESTER_CONFIG_H
 
 // ---------------------------------------------------------------------------
-// Global compile-time configuration for the 5-channel battery tester firmware.
+// Configuration for the passive INA219 battery capacity logger.
 // Override any of these via PlatformIO build_flags if needed.
 // ---------------------------------------------------------------------------
 
@@ -14,36 +14,40 @@
 #define BAUD_RATE 115200
 #endif
 
-// Sampling / control loop cadence (milliseconds)
-#ifndef LOOP_INTERVAL_MS
-#define LOOP_INTERVAL_MS 1000
+// How often to sample each channel and write a log entry (milliseconds)
+#ifndef LOG_INTERVAL_MS
+#define LOG_INTERVAL_MS 5000
 #endif
 
-// Voltage divider ratio:  V_batt = ADC * (R1 + R2) / R2
-// Default assumes a 2:1 divider (R1 = R2 = 100k) feeding the ESP8266 1.0V ADC
-// via a resistor divider; adjust to match your hardware.
-#ifndef VOLTAGE_DIVIDER_RATIO
-#define VOLTAGE_DIVIDER_RATIO 2.0f
+// --- INA219 I2C addresses --------------------------------------------------
+// Each INA219 breakout must have a unique address set via its A0/A1 jumpers.
+// Default addresses from the datasheet (0x40..0x45); change to match your
+// board wiring.
+#ifndef INA219_ADDRESSES
+#define INA219_ADDRESSES {0x40, 0x41, 0x42, 0x43, 0x44}
 #endif
 
-// ADC reference voltage for the ESP8266 (1.0V full scale on the bare chip,
-// but NodeMCU/Wemos boards include an on-board divider giving ~3.3V range).
-#ifndef ADC_REFERENCE_V
-#define ADC_REFERENCE_V 3.3f
+// INA219 calibration: shunt resistance in ohms and max current in amps.
+// These match the common blue INA219 breakout (0.1 ohm, 3.2A max).
+#ifndef SHUNT_OHMS
+#define SHUNT_OHMS 0.1f
 #endif
 
-// ADC bit depth (ESP8266 ADC is 10-bit: 0..1023)
-#define ADC_MAX 1023.0f
-
-// Discharge cut-off threshold (volts). Stop discharging below this to avoid
-// over-discharging li-ion cells. Override per-chemistry in firmware.
-#ifndef DISCHARGE_CUTOFF_V
-#define DISCHARGE_CUTOFF_V 3.0f
+#ifndef MAX_CURRENT_A
+#define MAX_CURRENT_A 3.2f
 #endif
 
-// Default discharge current target (milliamps). Set by hardware load circuit.
-#ifndef DISCHARGE_CURRENT_MA
-#define DISCHARGE_CURRENT_MA 500
+// --- Auto-detect thresholds ------------------------------------------------
+// A reading above this means a battery is connected and we should start
+// logging. Li-ion cells sit around 3.0–4.2V; use a conservative floor.
+#ifndef CONNECT_THRESHOLD_V
+#define CONNECT_THRESHOLD_V 2.5f
+#endif
+
+// A reading below this means the BMS has disconnected the battery and the
+// test is complete. The cell's protection board cuts off around 2.5–2.9V.
+#ifndef DISCONNECT_THRESHOLD_V
+#define DISCONNECT_THRESHOLD_V 2.0f
 #endif
 
 // Web server port
@@ -51,9 +55,10 @@
 #define WEB_SERVER_PORT 80
 #endif
 
-// History buffer length per channel (oldest samples are dropped first)
+// Max history samples per channel (kept in RAM). At 5s intervals this is
+// ~8 minutes; increase for longer runs or rely on CSV download.
 #ifndef HISTORY_LENGTH
-#define HISTORY_LENGTH 120
+#define HISTORY_LENGTH 600
 #endif
 
 #endif  // BATTERY_TESTER_CONFIG_H

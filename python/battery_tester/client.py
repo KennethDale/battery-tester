@@ -74,21 +74,15 @@ class BatteryTesterClient:
         return [ChannelStatus.from_dict(c) for c in data.get("channels", [])]
 
     def channel(self, index: int) -> ChannelStatus:
-        return ChannelStatus.from_dict(self._get(f"/api/channel/{index}").json())
+        return ChannelStatus.from_dict(self._get(f"/api/channel?n={index}").json())
 
-    def start(self, index: int, mode: str) -> ChannelStatus:
-        if mode not in ("charge", "discharge"):
-            raise ValueError("mode must be 'charge' or 'discharge'")
-        return ChannelStatus.from_dict(
-            self._post(f"/api/channel/{index}/start", {"mode": mode}).json()
-        )
-
-    def stop(self, index: int) -> ChannelStatus:
-        return ChannelStatus.from_dict(self._post(f"/api/channel/{index}/stop").json())
+    def reset(self, index: int) -> ChannelStatus:
+        """Clear a channel's accumulated data and return to WAITING."""
+        return ChannelStatus.from_dict(self._post(f"/api/reset?n={index}").json())
 
     def history_csv(self, index: int) -> str:
         """Return the raw CSV text for a channel's buffered history."""
-        return self._get(f"/api/history/{index}.csv", accept="text/csv").text
+        return self._get(f"/api/history?n={index}", accept="text/csv").text
 
     def history_rows(self, index: int) -> List[Dict[str, str]]:
         """Parse the CSV history into a list of row dicts."""

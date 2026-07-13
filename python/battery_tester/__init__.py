@@ -7,4 +7,4 @@ poll live status, export per-channel history, and stream readings to CSV.
 from .client import BatteryTesterClient, BatteryTesterError
 
 __all__ = ["BatteryTesterClient", "BatteryTesterError"]
-__version__ = "0.1.0"
+__version__ = "0.2.0"

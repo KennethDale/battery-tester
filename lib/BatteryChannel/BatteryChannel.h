@@ -2,92 +2,72 @@
 #define BATTERY_TESTER_BATTERY_CHANNEL_H
 
 #include <Arduino.h>
+#include <Adafruit_INA219.h>
 #include "config.h"
 
-// Test states a single channel can be in.
+// Logging states for a passive channel.
 enum class ChannelState : uint8_t {
-    IDLE = 0,        // Nothing happening, channel disabled
-    CHARGING = 1,    // Charging the cell
-    DISCHARGING = 2, // Discharging the cell through the load
-    COMPLETE = 3,    // Test finished, results available
-    FAULT = 4,       // Fault condition (over-temp, voltage out of range, etc.)
+    WAITING = 0,    // No battery connected (voltage below threshold)
+    LOGGING = 1,    // Battery detected, actively recording
+    COMPLETE = 2,   // BMS disconnected the battery; capacity recorded
 };
 
-// Convert a ChannelState to its lowercase string label (for JSON / UI).
 const char* channelStateToString(ChannelState s);
 
-// Single test-channel model.
+// One passive logging channel.
 //
-// One instance represents one of the 5 battery slots. It owns:
-//   * the analog input pin used to measure cell voltage,
-//   * a digital output pin that enables the charge circuit,
-//   * a digital output pin that enables the discharge load,
-//   * a rolling history buffer of voltage / current samples.
+// Each channel wraps a single INA219 on the I2C bus. A pre-charged battery
+// with a fixed load is connected to the INA219's Vin-/Vin+ shunt. The logger:
+//   * auto-detects when a battery is connected (voltage > CONNECT_THRESHOLD_V),
+//   * samples voltage / current / accumulated mAh every LOG_INTERVAL_MS,
+//   * auto-detects BMS disconnect (voltage < DISCONNECT_THRESHOLD_V) and
+//     freezes the recorded capacity as the final result.
 class BatteryChannel {
 public:
-    // Construct a channel. Pins are passed in from main so the mapping lives
-    // in one obvious place.
-    BatteryChannel(uint8_t index,
-                   uint8_t adcPin,
-                   uint8_t chargePin,
-                   uint8_t dischargePin,
-                   uint8_t loadEnablePin);
+    BatteryChannel(uint8_t index, uint8_t i2cAddress);
 
-    // Set up pin modes and zero out state. Call once in setup().
-    void begin();
+    // Initialize the INA219. Returns false if the sensor wasn't found.
+    bool begin();
 
-    // Read sensors, update state machine, and push a sample into history.
-    // Should be called every LOOP_INTERVAL_MS.
+    // Read the INA219 and update the state machine. Call every LOG_INTERVAL_MS.
     void update();
 
-    // --- Controls (called from web/serial commands) ------------------------
-    void startCharge();
-    void startDischarge();
-    void stop();
+    // Reset accumulated capacity and history; return to WAITING.
+    void reset();
 
     // --- Accessors ----------------------------------------------------------
     uint8_t index() const { return _index; }
     ChannelState state() const { return _state; }
-    float voltage() const { return _lastVoltage; }
-    float current() const { return _lastCurrent; }
-    float capacityMah() const { return _capacityMah; }
+    float voltage() const { return _lastVoltage; }      // Volts (bus)
+    float current() const { return _lastCurrent; }      // Amps (shunt)
+    float capacityMah() const { return _capacityMah; }  // mAh accumulated
     unsigned long elapsedSeconds() const { return _elapsedSeconds; }
 
-    // Serialize the latest sample as a JSON object line into `out`.
+    // Serialize the latest sample as a JSON object into `out`.
     void serializeLatest(String& out) const;
 
-    // Write all buffered history samples (CSV) into `out`. Used for downloads.
+    // Write all buffered history samples (CSV) into `out`.
     void serializeHistoryCsv(String& out) const;
 
 private:
-    // Hardware mapping
     uint8_t _index;
-    uint8_t _adcPin;
-    uint8_t _chargePin;
-    uint8_t _dischargePin;
-    uint8_t _loadEnablePin;
+    Adafruit_INA219 _ina;
 
-    // Runtime state
-    ChannelState _state = ChannelState::IDLE;
-    float _lastVoltage = 0.0f;     // Volts
-    float _lastCurrent = 0.0f;     // Amps
-    float _capacityMah = 0.0f;     // Accumulated mAh during discharge
+    ChannelState _state = ChannelState::WAITING;
+    float _lastVoltage = 0.0f;
+    float _lastCurrent = 0.0f;
+    float _capacityMah = 0.0f;
     unsigned long _elapsedSeconds = 0;
-    unsigned long _lastUpdateMs = 0;
+    unsigned long _lastSampleMs = 0;
 
-    // Rolling history buffers (index 0 = oldest once full)
+    // Rolling history ring buffer
     float _voltageHistory[HISTORY_LENGTH];
     float _currentHistory[HISTORY_LENGTH];
     uint32_t _timeHistory[HISTORY_LENGTH];
     size_t _historyCount = 0;
     size_t _historyHead = 0;
 
-    // Internal helpers
-    float readVoltage();
-    float readCurrent();
     void pushSample(float v, float a);
-    void setOutputs(bool charge, bool discharge);
-    void enterFault();
 };
 
 #endif  // BATTERY_TESTER_BATTERY_CHANNEL_H

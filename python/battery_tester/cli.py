@@ -1,8 +1,7 @@
-"""Command-line interface for the battery tester companion tool."""
+"""Command-line interface for the battery logger companion tool."""
 
 from __future__ import annotations
 
-import os
 import sys
 import time
 from pathlib import Path
@@ -23,8 +22,12 @@ def _client(host: str) -> BatteryTesterClient:
 
 
 def _fmt_time(s: int) -> str:
-    m, sec = divmod(int(s), 60)
-    return f"{m}m {sec}s"
+    if s is None:
+        return "—"
+    s = int(s)
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    return f"{h}h {m}m {sec}s" if h else f"{m}m {sec}s"
 
 
 @click.group()
@@ -32,13 +35,13 @@ def _fmt_time(s: int) -> str:
 @click.option(
     "--host",
     envvar="BATTERY_TESTER_HOST",
-    default="batterytester.local",
+    default="batterylogger.local",
     show_default=True,
-    help="Hostname or IP of the battery tester (or set BATTERY_TESTER_HOST).",
+    help="Hostname or IP of the battery logger (or set BATTERY_TESTER_HOST).",
 )
 @click.pass_context
 def cli(ctx: click.Context, host: str) -> None:
-    """Talk to the ESP8266 battery tester from your computer."""
+    """Talk to the ESP8266 battery capacity logger from your computer."""
     ctx.obj = {"host": host}
 
 
@@ -70,7 +73,7 @@ def status(ctx: click.Context) -> None:
 
 
 @cli.command()
-@click.option("-i", "--interval", default=2.0, show_default=True, help="Seconds between polls.")
+@click.option("-i", "--interval", default=5.0, show_default=True, help="Seconds between polls.")
 @click.pass_context
 def watch(ctx: click.Context, interval: float) -> None:
     """Continuously refresh channel status until Ctrl-C."""
@@ -91,30 +94,15 @@ def watch(ctx: click.Context, interval: float) -> None:
 
 @cli.command()
 @click.argument("channel", type=int)
-@click.argument("mode", type=click.Choice(["charge", "discharge"]))
 @click.pass_context
-def start(ctx: click.Context, channel: int, mode: str) -> None:
-    """Start a test on CHANNEL (0-indexed) in MODE."""
+def reset(ctx: click.Context, channel: int) -> None:
+    """Reset CHANNEL (0-indexed) — clear data and return to waiting."""
     try:
-        result = _client(ctx.obj["host"]).start(channel, mode)
-    except (BatteryTesterError, ValueError) as e:
-        console.print(f"[red]error:[/red] {e}")
-        sys.exit(1)
-    console.print(f"[green]started[/green] channel {channel}: {mode}")
-    _print_channel_table([result])
-
-
-@cli.command()
-@click.argument("channel", type=int)
-@click.pass_context
-def stop(ctx: click.Context, channel: int) -> None:
-    """Stop the test on CHANNEL (0-indexed)."""
-    try:
-        result = _client(ctx.obj["host"]).stop(channel)
+        result = _client(ctx.obj["host"]).reset(channel)
     except BatteryTesterError as e:
         console.print(f"[red]error:[/red] {e}")
         sys.exit(1)
-    console.print(f"[yellow]stopped[/yellow] channel {channel}")
+    console.print(f"[yellow]reset[/yellow] channel {channel}")
     _print_channel_table([result])
 
 

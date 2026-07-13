@@ -1,93 +1,107 @@
 # Hardware notes
 
-This document describes the reference hardware design the firmware expects.
-You are free to adapt it — just keep the pin mapping in [`src/main.cpp`](../src/main.cpp)
-in sync with your wiring.
+This document describes the reference hardware for the passive INA219 battery
+capacity logger.
 
-> ⚠️ **Lithium safety.** A single 18650 holds ~10 Wh. Five of them can dump
-> >100 A into a short. Use cell holders with welded protection boards, a per-
-> channel fuse, and a temperature sensor. The software cut-offs here are a
-> convenience, **not** a safety device.
+> ⚠️ **Lithium safety.** Use cells with protection boards (BMS). The BMS
+> determines when the test ends by cutting off. Always include a fuse per
+> channel.
 
-## Block diagram
+## Wiring overview
 
 ```
-            ┌──────────────┐
-   5V ─────▶│ 5→4.2V charge│──┬──▶ [ch0 TP4056 + DW01] ──▶ cell 0
-            │ regulators   │  ├─▶ [ch1 ...]              ──▶ cell 1
-   USB/PSU  │ (per cell)   │  ├─▶ ...                    ──▶ cell 2
-            └──────────────┘  ├─▶ ...                    ──▶ cell 3
-                              └─▶ ...                    ──▶ cell 4
+                     I2C Bus (shared)
+  ESP8266 D1 (SCL) ──┬──┬──┬──┬──┬──▶ INA219 #0..4 SCL
+  ESP8266 D2 (SDA) ──┼──┼──┼──┼──┼──▶ INA219 #0..4 SDA
+  ESP8266 3.3V    ───┼──┼──┼──┼──┼──▶ INA219 #0..4 VCC
+  ESP8266 GND     ───┴──┴──┴──┴──┴──▶ INA219 #0..4 GND
 
-   Each cell+ ── R1 ──┬── ADC mux input (CD4051 ch0..ch4)
-                      │
-                     R2
-                      │
-                     GND
-
-   Each cell+ ──▶ load MOSFET (low-side) ── current-sense resistor ──▶ GND
-                                                              │
-                                                  (sense amp → optional ADC)
+  Per channel:
+  Battery+ ──▶ INA219 Vin+ ──▶ INA219 Vin- ──▶ Load Resistor ──▶ Battery-
+                     │
+              (INA219 measures voltage & current here)
 ```
+
+Each channel is identical: the battery connects through the INA219's shunt to
+a fixed load resistor. The INA219 measures the bus voltage (battery voltage)
+and the shunt voltage (proportional to current).
 
 ## ESP8266 pin map (NodeMCU 1.0 / Wemos D1)
 
-| GPIO  | NodeMCU pin | Firmware role                  |
-| ----- | ----------- | ------------------------------ |
-| A0    | A0          | Shared ADC (via analog mux)    |
-| GPIO5 | D1          | MUX select bit 0               |
-| GPIO4 | D2          | MUX select bit 1               |
-| GPIO0 | D3          | MUX select bit 2               |
-| GPIO2 | D4          | Global load-enable (active high)|
-| GPIO14| D5          | Channel 0 gate                 |
-| GPIO12| D6          | Channel 1 gate                 |
-| GPIO13| D7          | Channel 2 gate                 |
-| GPIO15| D8          | Channel 3 gate                 |
-| GPIO16| D0          | Channel 4 gate                 |
+| GPIO  | NodeMCU pin | Role                          |
+| ----- | ----------- | ----------------------------- |
+| GPIO5 | D1          | I2C SCL (all INA219s)         |
+| GPIO4 | D2          | I2C SDA (all INA219s)         |
+| 3.3V  | 3V3         | INA219 VCC                    |
+| GND   | GND         | Common ground                 |
 
-> These pin assignments are defaults in `src/main.cpp` — change them there if
-> your board differs.
+Only 2 GPIO pins are needed for all 5 channels — everything goes over I2C.
 
-## Suggested bill of materials
+## INA219 address configuration
 
-| Part                         | Qty | Notes                                            |
-| ---------------------------- | --- | ------------------------------------------------ |
-| ESP8266 dev board            | 1   | NodeMCU 1.0 or Wemos D1 R2                       |
-| CD4051 analog mux            | 1   | 8:1 mux, only 5 inputs used                      |
-| TP4056 + protection board    | 5   | Per-cell charge + DW01 overcharge/overdischarge  |
-| P-channel MOSFET (charge)    | 5   | e.g. IRF4905, driven by a small NPN level shifter|
-| N-channel MOSFET (discharge) | 5   | e.g. IRLZ44N (logic-level)                       |
-| Power resistor (load)        | 5   | 8Ω 5W gives ~0.5A at 4V; pick for your target    |
-| Current-sense resistor       | 5   | 0.1Ω 1% → 50 mV at 0.5A                          |
-| INA219 breakout (optional)   | 5   | Accurate I²C current/voltage (recommended)       |
-| 18650 cell holder            | 5   | With welded protection board preferred           |
-| Fuse (per channel)           | 5   | ~2A polyfuse or glass fuse                       |
+Each INA219 breakout has two address jumpers (A0, A1) that set its I2C address.
+You need 5 unique addresses. The default addresses available are:
 
-## Voltage divider sizing
+| A0 jumper | A1 jumper | I2C address | Channel |
+| --------- | --------- | ----------- | ------- |
+| GND       | GND       | 0x40        | 0       |
+| VS        | GND       | 0x41        | 1       |
+| SDA       | GND       | 0x42        | 2       |
+| GND       | VS        | 0x43        | 3       |
+| VS        | VS        | 0x44        | 4       |
 
-The ESP8266 ADC reads 0–1 V on the bare chip, or 0–3.3 V on dev boards with an
-onboard divider. To measure a 4.2 V cell safely on a bare chip, use:
+Set these addresses on each breakout by soldering the A0/A1 pads according to
+the breakout's silkscreen. Match the order to `INA219_ADDRESSES` in
+`config.h`.
 
-```
-V_adc = V_cell * R2 / (R1 + R2)
-1.0 V = 4.2 V * R2 / (R1 + R2)  →  R1 = 3.2 * R2
-```
+> **Pull-ups:** The I2C bus needs 4.7kΩ pull-up resistors on SDA and SCL.
+> Many INA219 breakouts include them — if using 5 boards, only enable pull-ups
+> on one (cut the traces on the other 4) to avoid overloading the bus.
 
-Example: `R1 = 320 kΩ`, `R2 = 100 kΩ`. Set `VOLTAGE_DIVIDER_RATIO` in
-`config.h` to `(R1 + R2) / R2 = 4.2`.
+## Load resistor sizing
 
-On NodeMCU/Wemos (onboard divider, 3.3 V max), a 2:1 external divider
-(`R1 = R2 = 100 kΩ`) brings 4.2 V down to 2.1 V, comfortably inside range.
-The default `VOLTAGE_DIVIDER_RATIO = 2.0` matches this.
+Choose a load resistor appropriate for the cell and target discharge rate:
 
-## Current measurement (upgrade path)
+| Target current | Load resistor (at 3.7V) | Power rating |
+| -------------- | ----------------------- | ------------ |
+| 250 mA         | ~15Ω                    | ≥ 1W         |
+| 500 mA         | ~7.5Ω                   | ≥ 2W         |
+| 1 A            | ~3.7Ω                   | ≥ 5W         |
 
-`BatteryChannel::readCurrent()` currently returns a nominal value. For real
-capacity integration, add either:
+Use wirewound or ceramic power resistors. The resistor must dissipate
+`P = I² × R` continuously — err on the side of a higher wattage rating.
 
-- **INA219** modules on the I²C bus (one per channel — set different I²C
-  addresses via the A0/A1 jumpers), or
-- An **ADS1115** 4-channel ADC reading the voltage across each shunt resistor.
+## Bill of materials
 
-Both libraries are available in the PlatformIO registry; replace
-`readCurrent()` in `lib/BatteryChannel/BatteryChannel.cpp` with the real read.
+| Part                         | Qty | Notes                                   |
+| ---------------------------- | --- | --------------------------------------- |
+| ESP8266 dev board            | 1   | NodeMCU 1.0 or Wemos D1 R2              |
+| INA219 breakout              | 5   | Each at a unique I2C address (0x40–0x44)|
+| Power resistor (load)        | 5   | Sized for your target current           |
+| 18650 cell holder + BMS      | 5   | Protected cells or add a protection board|
+| Fuse (per channel)           | 5   | ~2A polyfuse or glass fuse              |
+| 4.7kΩ resistor (I2C pull-up) | 2   | Only needed if breakouts lack pull-ups  |
+| Breadboard / perfboard       | 1   | For wiring                              |
+
+## How auto-detect works
+
+The firmware uses two voltage thresholds (defined in `config.h`):
+
+1. **`CONNECT_THRESHOLD_V` (2.5V)** — When voltage rises above this, the
+   logger starts recording. This detects when you plug in a charged cell.
+
+2. **`DISCONNECT_THRESHOLD_V` (2.0V)** — When voltage drops below this, the
+   BMS has cut off the battery. The logger freezes the capacity reading and
+   marks the channel as `COMPLETE`.
+
+A typical li-ion BMS cuts off around 2.5V under load. The default 2.0V
+threshold is conservative — you can raise it to match your BMS if needed.
+
+## Calibration
+
+The INA219 breakout comes with a 0.1Ω shunt resistor and is calibrated for
+3.2A max by default. If your breakout has a different shunt, update
+`SHUNT_OHMS` and `MAX_CURRENT_A` in `config.h`.
+
+To verify calibration, connect a known load and compare the firmware's current
+reading against a multimeter. Fine-tune the shunt value if needed.
