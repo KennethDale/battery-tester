@@ -1,0 +1,88 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.python-version
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Testing / coverage
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# --- PlatformIO / Embedded ---
+.pio/
+.pioenvs/
+.piolibdeps/
+.pyclsincluded
+platformio.ini.local
+*.elf
+*.bin
+*.hex
+*.map
+*.eep
+*.lst
+
+# VS Code / PlatformIO IDE
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# --- Build artifacts ---
+firmware/
+output/
+*.log
+
+# --- Data / runtime (keep structure, ignore generated data) ---
+data_exports/
+*.csv
+!python/tests/fixtures/*.csv
+*.db
+*.sqlite
+*.sqlite3
+
+# --- OS files ---
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# --- Secrets / local config ---
+secrets.h
+credentials.h
+.env
+.env.local
+config.local.h
+
+# --- Documentation build ---
+docs/_build/
+site/

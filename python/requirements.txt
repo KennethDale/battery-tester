@@ -1,0 +1,7 @@
+# Python companion tool dependencies
+# Install with:  pip install -r python/requirements.txt
+
+requests>=2.31.0   # HTTP client for the ESP8266 JSON/CSV API
+pyserial>=3.5      # Serial port discovery / optional direct serial monitor
+click>=8.1.0       # CLI framework
+rich>=13.7.0       # Pretty terminal output / tables

@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Battery Tester</title>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --card: #1a1d24;
+      --accent: #4aa8df;
+      --good: #2ecc71;
+      --warn: #f39c12;
+      --bad: #e74c3c;
+      --text: #e6e6e6;
+      --muted: #8a8f98;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    header {
+      padding: 1rem 1.5rem;
+      background: linear-gradient(135deg, #1f242d, #11141a);
+      border-bottom: 1px solid #2a2f38;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    header h1 { margin: 0; font-size: 1.25rem; }
+    header .meta { color: var(--muted); font-size: 0.85rem; }
+    main { padding: 1.5rem; max-width: 1200px; margin: 0 auto; }
+    .grid {
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid #262b34;
+      border-radius: 10px;
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+    .card h2 {
+      margin: 0;
+      font-size: 1rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .badge {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 0.15rem 0.5rem;
+      border-radius: 999px;
+      border: 1px solid transparent;
+    }
+    .badge.idle        { color: var(--muted); border-color: #3a4049; }
+    .badge.charging    { color: var(--good);  border-color: var(--good); }
+    .badge.discharging { color: var(--warn);  border-color: var(--warn); }
+    .badge.complete    { color: var(--accent); border-color: var(--accent); }
+    .badge.fault       { color: var(--bad);   border-color: var(--bad); }
+    .metric { display: flex; justify-content: space-between; font-size: 0.9rem; }
+    .metric .label { color: var(--muted); }
+    .meter {
+      height: 8px;
+      background: #11141a;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .meter > div {
+      height: 100%;
+      background: linear-gradient(90deg, var(--bad), var(--warn), var(--good));
+      width: 0%;
+      transition: width 0.4s ease;
+    }
+    .controls { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    button {
+      flex: 1;
+      min-width: 90px;
+      padding: 0.5rem 0.75rem;
+      border-radius: 8px;
+      border: 1px solid #2a2f38;
+      background: #22262f;
+      color: var(--text);
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+    button:hover { border-color: var(--accent); }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    button.charge { color: var(--good); }
+    button.discharge { color: var(--warn); }
+    button.stop { color: var(--bad); }
+    .download { text-align: center; }
+    a.csv {
+      display: inline-block;
+      margin-top: 0.5rem;
+      font-size: 0.8rem;
+      color: var(--accent);
+      text-decoration: none;
+    }
+    a.csv:hover { text-decoration: underline; }
+    footer {
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.75rem;
+      padding: 2rem 1rem;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🔋 Battery Tester</h1>
+    <div class="meta" id="meta">connecting…</div>
+  </header>
+
+  <main>
+    <section class="grid" id="channels"></section>
+  </main>
+
+  <footer>
+    ESP8266 battery tester &middot; <span id="fw">fw ?</span> &middot;
+    auto-refresh every 2s
+  </footer>
+
+  <script>
+    const NUM_CHANNELS_HINT = 5;
+    const channelsEl = document.getElementById('channels');
+    const metaEl = document.getElementById('meta');
+    const fwEl = document.getElementById('fw');
+
+    const cards = {};
+    for (let i = 0; i < NUM_CHANNELS_HINT; i++) {
+      cards[i] = buildCard(i);
+      channelsEl.appendChild(cards[i].root);
+    }
+
+    function buildCard(i) {
+      const root = document.createElement('div');
+      root.className = 'card';
+      root.innerHTML = `
+        <h2>Channel ${i + 1} <span class="badge idle" data-state>idle</span></h2>
+        <div class="meter"><div data-fill></div></div>
+        <div class="metric"><span class="label">Voltage</span><span data-v>— V</span></div>
+        <div class="metric"><span class="label">Current</span><span data-a>— A</span></div>
+        <div class="metric"><span class="label">Capacity</span><span data-mah>— mAh</span></div>
+        <div class="metric"><span class="label">Elapsed</span><span data-time>—</span></div>
+        <div class="controls">
+          <button class="charge"    data-act="charge">Charge</button>
+          <button class="discharge" data-act="discharge">Discharge</button>
+          <button class="stop"      data-act="stop">Stop</button>
+        </div>
+        <div class="download">
+          <a class="csv" href="/api/history/${i}.csv" download>Download CSV ↧</a>
+        </div>
+      `;
+      root.querySelectorAll('button').forEach((btn) => {
+        btn.addEventListener('click', () => sendCommand(i, btn.dataset.act));
+      });
+      return {
+        root,
+        state: root.querySelector('[data-state]'),
+        fill: root.querySelector('[data-fill]'),
+        v: root.querySelector('[data-v]'),
+        a: root.querySelector('[data-a]'),
+        mah: root.querySelector('[data-mah]'),
+        time: root.querySelector('[data-time]'),
+      };
+    }
+
+    async function sendCommand(i, action) {
+      try {
+        if (action === 'stop') {
+          await fetch(`/api/channel/${i}/stop`, { method: 'POST' });
+        } else {
+          await fetch(`/api/channel/${i}/start`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode: action }),
+          });
+        }
+        pollOnce();
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    function fmtTime(s) {
+      if (s == null || isNaN(s)) return '—';
+      const m = Math.floor(s / 60);
+      const sec = s % 60;
+      return `${m}m ${sec}s`;
+    }
+
+    async function pollOnce() {
+      try {
+        const res = await fetch('/api/status');
+        const json = await res.json();
+        (json.channels || []).forEach((ch) => updateCard(ch));
+      } catch (e) {
+        metaEl.textContent = 'connection lost';
+      }
+    }
+
+    function updateCard(ch) {
+      const c = cards[ch.channel];
+      if (!c) return;
+      c.state.textContent = ch.state;
+      c.state.className = `badge ${ch.state}`;
+      c.v.textContent = (ch.voltage ?? 0).toFixed(3) + ' V';
+      c.a.textContent = (ch.current ?? 0).toFixed(3) + ' A';
+      c.mah.textContent = (ch.capacity_mah ?? 0).toFixed(0) + ' mAh';
+      c.time.textContent = fmtTime(ch.elapsed_s);
+      // Map 3.0V..4.2V to 0..100%
+      const pct = Math.max(0, Math.min(100, ((ch.voltage - 3.0) / 1.2) * 100));
+      c.fill.style.width = pct + '%';
+    }
+
+    async function loadInfo() {
+      try {
+        const res = await fetch('/api/info');
+        const info = await res.json();
+        fwEl.textContent = `fw ${info.firmware}`;
+        metaEl.textContent = `chip ${info.chip_id} · ${info.channels} channels`;
+      } catch (_) {}
+    }
+
+    loadInfo();
+    pollOnce();
+    setInterval(pollOnce, 2000);
+  </script>
+</body>
+</html>
