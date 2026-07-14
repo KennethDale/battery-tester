@@ -7,7 +7,7 @@
 // ---------------------------------------------------------------------------
 
 #ifndef NUM_CHANNELS
-#define NUM_CHANNELS 5
+#define NUM_CHANNELS 8
 #endif
 
 #ifndef BAUD_RATE
@@ -24,7 +24,7 @@
 // Default addresses from the datasheet (0x40..0x45); change to match your
 // board wiring.
 #ifndef INA219_ADDRESSES
-#define INA219_ADDRESSES {0x40, 0x41, 0x42, 0x43, 0x44}
+#define INA219_ADDRESSES {0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47}
 #endif
 
 // INA219 calibration: shunt resistance in ohms and max current in amps.
@@ -56,9 +56,9 @@
 #endif
 
 // Max history samples per channel (kept in RAM). At 5s intervals this is
-// ~8 minutes; increase for longer runs or rely on CSV download.
+// ~5.5 minutes; reduced from 600 to save RAM when running 8 channels.
 #ifndef HISTORY_LENGTH
-#define HISTORY_LENGTH 600
+#define HISTORY_LENGTH 400
 #endif
 
 #endif  // BATTERY_TESTER_CONFIG_H

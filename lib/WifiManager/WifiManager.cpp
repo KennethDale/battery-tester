@@ -5,8 +5,7 @@ bool wifiIsConnected() {
 }
 
 void startSoftAp() {
-    char ssid[32];
-    snprintf(ssid, sizeof(ssid), "BatteryTester-%06X", ESP.getChipId());
+    const char* ssid = "CapacityTester";
     WiFi.mode(WIFI_AP);
     bool ok = WiFi.softAP(ssid);
     Serial.print(F("[wifi] soft AP "));

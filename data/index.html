@@ -37,7 +37,18 @@
     .grid {
       display: grid;
       gap: 1rem;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      /* Prefer 4 columns when the viewport is wide enough for two rows of 4. */
+      grid-template-columns: repeat(4, 1fr);
+    }
+    @media (max-width: 1200px) {
+      .grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+    @media (max-width: 600px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
     }
     .card {
       background: var(--card);
@@ -49,6 +60,7 @@
       gap: 0.5rem;
     }
     .card.complete { border-color: var(--good); }
+    .card.offline { border-color: #ff4d4d; opacity: 0.75; }
     .card-header {
       display: flex;
       justify-content: space-between;
@@ -67,6 +79,7 @@
     .badge.waiting  { color: var(--muted);  border-color: #3a4049; }
     .badge.logging  { color: var(--accent); border-color: var(--accent); }
     .badge.complete { color: var(--good);   border-color: var(--good); }
+    .badge.offline  { color: #ff4d4d;       border-color: #ff4d4d; }
     .capacity {
       font-size: 2.5rem;
       font-weight: 700;
@@ -88,6 +101,22 @@
       background: linear-gradient(90deg, var(--warn), var(--good));
       width: 0%;
       transition: width 0.5s ease;
+    }
+    .sparkline {
+      height: 20px;
+      min-height: 20px;
+      max-height: 20px;
+      width: 100%;
+      background: #11141a;
+      border-radius: 4px;
+      overflow: hidden;
+      display: block;
+    }
+    .discharge {
+      font-size: 0.75rem;
+      color: var(--muted);
+      text-align: center;
+      min-height: 1em;
     }
     .actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
     button, a.btn {
@@ -128,7 +157,7 @@
   </footer>
 
   <script>
-    const NUM = 5;
+    const NUM = 8;
     const channelsEl = document.getElementById('channels');
     const metaEl = document.getElementById('meta');
     const fwEl = document.getElementById('fw');
@@ -145,13 +174,17 @@
       root.innerHTML = `
         <div class="card-header">
           <h2>Channel ${i + 1}</h2>
-          <span class="badge waiting" data-state>waiting</span>
+          <span class="badge waiting" data-state title="INA219 state">waiting</span>
         </div>
         <div class="capacity" data-cap>— <span class="unit">mAh</span></div>
         <div class="meter"><div data-fill></div></div>
         <div class="metric"><span class="label">Voltage</span><span data-v>— V</span></div>
         <div class="metric"><span class="label">Current</span><span data-a>— A</span></div>
         <div class="metric"><span class="label">Elapsed</span><span data-time>—</span></div>
+        <svg class="sparkline" data-spark viewBox="0 0 100 20" preserveAspectRatio="none">
+          <polyline fill="none" stroke="var(--accent)" stroke-width="1.5" points=""/>
+        </svg>
+        <div class="discharge" data-discharge></div>
         <div class="actions">
           <button class="reset" data-reset>Reset</button>
           <a class="btn" href="/api/history?n=${i}" download>CSV ↓</a>
@@ -166,6 +199,8 @@
         v: root.querySelector('[data-v]'),
         a: root.querySelector('[data-a]'),
         time: root.querySelector('[data-time]'),
+        spark: root.querySelector('[data-spark] polyline'),
+        discharge: root.querySelector('[data-discharge]'),
       };
     }
 
@@ -187,17 +222,84 @@
     function updateCard(ch) {
       const c = cards[ch.channel];
       if (!c) return;
-      c.state.textContent = ch.state;
-      c.state.className = `badge ${ch.state}`;
-      c.root.className = `card ${ch.state === 'complete' ? 'complete' : ''}`;
+      const isConnected = ch.connected !== false;
+      const displayState = isConnected ? ch.state : 'offline';
+      c.state.textContent = displayState;
+      c.state.className = `badge ${displayState}`;
+      c.root.className = `card ${ch.state === 'complete' ? 'complete' : ''} ${isConnected ? '' : 'offline'}`;
+      if (!isConnected) {
+        c.cap.innerHTML = '— <span class="unit">mAh</span>';
+        c.v.textContent = '— V';
+        c.a.textContent = '— A';
+        c.time.textContent = '—';
+        c.fill.style.width = '0%';
+        c.spark.setAttribute('points', '');
+        c.discharge.textContent = 'INA219 not connected';
+        return;
+      }
       const mah = ch.capacity_mah || 0;
       c.cap.innerHTML = `${mah.toFixed(0)} <span class="unit">mAh</span>`;
-      c.v.textContent = (ch.voltage ?? 0).toFixed(3) + ' V';
-      c.a.textContent = (ch.current ?? 0).toFixed(3) + ' A';
+      c.v.textContent = (ch.voltage == null ? '—' : ch.voltage.toFixed(3)) + ' V';
+      c.a.textContent = (ch.current == null ? '—' : ch.current.toFixed(3)) + ' A';
       c.time.textContent = fmtTime(ch.elapsed_s);
       // Voltage bar: map 2.0V..4.2V to 0..100%
-      const pct = Math.max(0, Math.min(100, ((ch.voltage - 2.0) / 2.2) * 100));
+      const pct = ch.voltage == null ? 0
+        : Math.max(0, Math.min(100, ((ch.voltage - 2.0) / 2.2) * 100));
       c.fill.style.width = pct + '%';
+      loadSparkline(ch.channel);
+    }
+
+    async function loadSparkline(i) {
+      const c = cards[i];
+      if (!c) return;
+      try {
+        const res = await fetch(`/api/history?n=${i}`);
+        const text = await res.text();
+        const rows = text.trim().split('\n').slice(1);
+        if (rows.length < 2) {
+          c.spark.setAttribute('points', '');
+          c.discharge.textContent = '';
+          return;
+        }
+        let samples = rows.map(r => r.split(',').map(Number));
+        const maxT = samples[samples.length - 1][0];
+        const cutoffT = maxT - 1800; // last 30 minutes
+        samples = samples.filter(([t]) => t >= cutoffT).slice(-60);
+        if (samples.length < 2) {
+          c.spark.setAttribute('points', '');
+          c.discharge.textContent = '';
+          return;
+        }
+        const tMin = samples[0][0];
+        const tMax = samples[samples.length - 1][0];
+        const vMin = 2.0, vMax = 4.2;
+        const points = samples.map(([t, v]) => {
+          const x = ((t - tMin) / (tMax - tMin || 1)) * 100;
+          const y = 20 - ((Math.max(vMin, Math.min(vMax, v)) - vMin) / (vMax - vMin)) * 20;
+          return `${x.toFixed(2)},${y.toFixed(2)}`;
+        }).join(' ');
+        c.spark.setAttribute('points', points);
+
+        // Find peak voltage and report discharge since then.
+        let peakIdx = 0;
+        for (let i = 1; i < samples.length; i++) {
+          if (samples[i][1] > samples[peakIdx][1]) peakIdx = i;
+        }
+        const peak = samples[peakIdx];
+        const now = samples[samples.length - 1];
+        const dt = now[0] - peak[0];
+        const mah = now[3] - peak[3];
+        let wh = 0;
+        for (let i = peakIdx + 1; i < samples.length; i++) {
+          const dtSeg = samples[i][0] - samples[i - 1][0];
+          const vAvg = (samples[i][1] + samples[i - 1][1]) / 2;
+          const iAvg = Math.abs((samples[i][2] + samples[i - 1][2]) / 2);
+          wh += vAvg * iAvg * (dtSeg / 3600);
+        }
+        c.discharge.textContent = dt > 0
+          ? `↓ ${fmtTime(dt)} · ${mah.toFixed(0)} mAh · ${wh.toFixed(2)} Wh`
+          : '';
+      } catch (e) { console.error(e); }
     }
 
     async function pollOnce() {

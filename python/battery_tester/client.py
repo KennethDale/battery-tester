@@ -18,6 +18,7 @@ class BatteryTesterError(RuntimeError):
 class ChannelStatus:
     channel: int
     state: str
+    connected: bool
     voltage: float
     current: float
     capacity_mah: float
@@ -28,6 +29,7 @@ class ChannelStatus:
         return cls(
             channel=int(d.get("channel", -1)),
             state=str(d.get("state", "unknown")),
+            connected=bool(d.get("connected", False)),
             voltage=float(d.get("voltage", 0.0)),
             current=float(d.get("current", 0.0)),
             capacity_mah=float(d.get("capacity_mah", 0.0)),

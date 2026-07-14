@@ -29,6 +29,9 @@ public:
     // Initialize the INA219. Returns false if the sensor wasn't found.
     bool begin();
 
+    // True if the INA219 was found during begin().
+    bool sensorConnected() const { return _sensorConnected; }
+
     // Read the INA219 and update the state machine. Call every LOG_INTERVAL_MS.
     void update();
 
@@ -41,6 +44,7 @@ public:
     float voltage() const { return _lastVoltage; }      // Volts (bus)
     float current() const { return _lastCurrent; }      // Amps (shunt)
     float capacityMah() const { return _capacityMah; }  // mAh accumulated
+    float capacityWh() const { return _capacityWh; }    // Wh accumulated
     unsigned long elapsedSeconds() const { return _elapsedSeconds; }
 
     // Serialize the latest sample as a JSON object into `out`.
@@ -52,17 +56,20 @@ public:
 private:
     uint8_t _index;
     Adafruit_INA219 _ina;
+    bool _sensorConnected = false;
 
     ChannelState _state = ChannelState::WAITING;
     float _lastVoltage = 0.0f;
     float _lastCurrent = 0.0f;
     float _capacityMah = 0.0f;
+    float _capacityWh = 0.0f;
     unsigned long _elapsedSeconds = 0;
     unsigned long _lastSampleMs = 0;
 
-    // Rolling history ring buffer
-    float _voltageHistory[HISTORY_LENGTH];
-    float _currentHistory[HISTORY_LENGTH];
+    // Rolling history ring buffer, stored in fixed-point to save RAM.
+    // Voltage and current are stored as millivolts / milliamps.
+    int16_t _voltageHistory[HISTORY_LENGTH];
+    int16_t _currentHistory[HISTORY_LENGTH];
     uint32_t _timeHistory[HISTORY_LENGTH];
     size_t _historyCount = 0;
     size_t _historyHead = 0;

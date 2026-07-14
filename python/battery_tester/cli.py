@@ -137,6 +137,7 @@ def _print_channel_table(channels) -> None:
     table = Table(title="Battery Channels")
     table.add_column("Ch", justify="right")
     table.add_column("State")
+    table.add_column("INA219", justify="center")
     table.add_column("Voltage", justify="right")
     table.add_column("Current", justify="right")
     table.add_column("Capacity", justify="right")
@@ -145,6 +146,7 @@ def _print_channel_table(channels) -> None:
         table.add_row(
             str(ch.channel),
             ch.state,
+            "✓" if ch.connected else "✗",
             f"{ch.voltage:.3f} V",
             f"{ch.current:.3f} A",
             f"{ch.capacity_mah:.0f} mAh",

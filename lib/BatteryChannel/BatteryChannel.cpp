@@ -13,7 +13,8 @@ BatteryChannel::BatteryChannel(uint8_t index, uint8_t i2cAddress)
     : _index(index), _ina(i2cAddress) {}
 
 bool BatteryChannel::begin() {
-    if (!_ina.begin()) {
+    _sensorConnected = _ina.begin();
+    if (!_sensorConnected) {
         Serial.printf("[ch%u] INA219 not found\n", _index);
         return false;
     }
@@ -33,8 +34,9 @@ bool BatteryChannel::begin() {
 }
 
 void BatteryChannel::pushSample(float v, float a) {
-    _voltageHistory[_historyHead] = v;
-    _currentHistory[_historyHead] = a;
+    // Store voltage/current as fixed-point millivolts/milliamps to save RAM.
+    _voltageHistory[_historyHead] = static_cast<int16_t>(v * 1000.0f + 0.5f);
+    _currentHistory[_historyHead] = static_cast<int16_t>(a * 1000.0f + 0.5f);
     _timeHistory[_historyHead] = _elapsedSeconds;
     _historyHead = (_historyHead + 1) % HISTORY_LENGTH;
     if (_historyCount < HISTORY_LENGTH) ++_historyCount;
@@ -109,10 +111,12 @@ void BatteryChannel::serializeLatest(String& out) const {
     out += _index;
     out += ",\"state\":\"";
     out += channelStateToString(_state);
-    out += "\",\"voltage\":";
-    out += String(_lastVoltage, 3);
+    out += "\",\"connected\":";
+    out += _sensorConnected ? "true" : "false";
+    out += ",\"voltage\":";
+    out += (_state == ChannelState::WAITING) ? "null" : String(_lastVoltage, 3);
     out += ",\"current\":";
-    out += String(_lastCurrent, 3);
+    out += (_state == ChannelState::WAITING) ? "null" : String(_lastCurrent, 3);
     out += ",\"capacity_mah\":";
     out += String(_capacityMah, 1);
     out += ",\"elapsed_s\":";
@@ -121,16 +125,26 @@ void BatteryChannel::serializeLatest(String& out) const {
 }
 
 void BatteryChannel::serializeHistoryCsv(String& out) const {
-    out += "elapsed_s,voltage,current_a\n";
+    out += "elapsed_s,voltage,current_a,capacity_mah\n";
     if (_historyCount == 0) return;
+    // Reconstruct approximate capacity at each sample by integrating from the start.
+    float cap = 0.0f;
     size_t start = (_historyCount < HISTORY_LENGTH) ? 0 : _historyHead;
     for (size_t i = 0; i < _historyCount; ++i) {
         size_t idx = (start + i) % HISTORY_LENGTH;
+        if (i > 0) {
+            size_t prev = (start + i - 1) % HISTORY_LENGTH;
+            float dt = static_cast<float>(_timeHistory[idx] - _timeHistory[prev]);
+            float a = _currentHistory[idx];
+            cap += (a > 0 ? a : -a) * 1000.0f * (dt / 3600.0f);
+        }
         out += String(_timeHistory[idx]);
         out += ',';
-        out += String(_voltageHistory[idx], 3);
+        out += String(_voltageHistory[idx] / 1000.0f, 3);
         out += ',';
-        out += String(_currentHistory[idx], 3);
+        out += String(_currentHistory[idx] / 1000.0f, 3);
+        out += ',';
+        out += String(cap, 1);
         out += '\n';
     }
 }

@@ -27,14 +27,19 @@
 static const uint8_t INA_ADDRESSES[NUM_CHANNELS] = INA219_ADDRESSES;
 
 // --- Globals ---------------------------------------------------------------
-BatteryChannel channels[NUM_CHANNELS] = {
-    BatteryChannel(0, INA_ADDRESSES[0]),
-    BatteryChannel(1, INA_ADDRESSES[1]),
-    BatteryChannel(2, INA_ADDRESSES[2]),
-    BatteryChannel(3, INA_ADDRESSES[3]),
-    BatteryChannel(4, INA_ADDRESSES[4]),
-};
-BatteryWebServer webServer(channels, NUM_CHANNELS);
+BatteryChannel* channels = nullptr;
+BatteryWebServer* webServer = nullptr;
+
+// --- Helpers ---------------------------------------------------------------
+static BatteryChannel* makeChannels(const uint8_t addresses[], uint8_t count) {
+    // Allocate raw storage, then construct each channel in place.
+    void* mem = ::operator new[](sizeof(BatteryChannel) * count);
+    BatteryChannel* arr = static_cast<BatteryChannel*>(mem);
+    for (uint8_t i = 0; i < count; ++i) {
+        new (&arr[i]) BatteryChannel(i, addresses[i]);
+    }
+    return arr;
+}
 
 // --- setup / loop ----------------------------------------------------------
 void setup() {
@@ -54,6 +59,10 @@ void setup() {
         Serial.println(F("[boot] LittleFS mounted"));
     }
 
+    // Allocate channels dynamically so NUM_CHANNELS can be changed without
+    // editing the initializer list.
+    channels = makeChannels(INA_ADDRESSES, NUM_CHANNELS);
+
     // Initialize each INA219
     uint8_t found = 0;
     for (uint8_t i = 0; i < NUM_CHANNELS; ++i) {
@@ -70,7 +79,8 @@ void setup() {
         Serial.println(F("[boot] mDNS: http://batterylogger.local"));
     }
 
-    webServer.begin();
+    webServer = new BatteryWebServer(channels, NUM_CHANNELS);
+    webServer->begin();
     Serial.println(F("[boot] ready"));
 }
 
@@ -86,6 +96,6 @@ void loop() {
         }
     }
 
-    webServer.loop();
+    webServer->loop();
     MDNS.update();
 }

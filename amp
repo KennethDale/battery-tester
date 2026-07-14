@@ -1,0 +1,62 @@
+Traceback (most recent call last):
+Traceback (most recent call last):
+  File "/Users/ken/.platformio/packages/tool-esptoolpy/esptool.py", line 3969, in <module>
+  File "/Users/ken/.platformio/packages/tool-esptoolpy/esptool.py", line 3969, in <module>
+    _main()
+    _main()
+    ~~~~    ~~~~~^^
+~^^
+  File "/Users/ken/.platformio/packages/tool-esptoolpy/esptool.py", line 3962, in _main
+  File "/Users/ken/.platformio/packages/tool-esptoolpy/esptool.py", line 3962, in _main
+    main()
+    main()
+    ~~~~^^    ~~~~^^
+
+  File "/Users/ken/.platformio/packages/tool-esptoolpy/esptool.py", line 3552, in main
+  File "/Users/ken/.platformio/packages/tool-esptoolpy/esptool.py", line 3552, in main
+    esp.connect(args.before, args.connect_attempts)
+    esp.connect(args.before, args.connect_attempts)
+    ~~~~~~~~~~~^^    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ken/.platformio/packages/tool-esptoolpy/esptool.py", line 522, in connect
+  File "/Users/ken/.platformio/packages/tool-esptoolpy/esptool.py", line 522, in connect
+    last_error = self._connect_attempt(mode=mode, esp32r0_delay=True)
+  File "/Users/ken/.platformio/packages/tool-esptoolpy/esptool.py", line 499, in _connect_attempt
+    last_error = self._connect_attempt(mode=mode, esp32r0_delay=True)
+  File "/Users/ken/.platformio/packages/tool-esptoolpy/esptool.py", line 499, in _connect_attempt
+    self.sync()
+    ~~~~~~~~    self.sync()
+    ~~~~~~~~~^^
+~^^
+  File "/Users/ken/.platformio/packages/tool-esptoolpy/esptool.py", line 440, in sync
+  File "/Users/ken/.platformio/packages/tool-esptoolpy/esptool.py", line 440, in sync
+    self.command()
+    self.command()
+    ~~~~~~~    ~~~~~~~~~~~~^^
+~~~~~^^
+  File "/Users/ken/.platformio/packages/tool-esptoolpy/esptool.py", line 386, in command
+  File "/Users/ken/.platformio/packages/tool-esptoolpy/esptool.py", line 386, in command
+    p = self.read()
+    p = self.read()
+  File "/Users/ken/.platformio/packages/tool-esptoolpy/esptool.py", line 331, in read
+    return next(self._slip_reader)
+  File "/Users/ken/.platformio/packages/tool-esptoolpy/esptool.py", line 331, in read
+    return next(self._slip_reader)
+  File "/Users/ken/.platformio/packages/tool-esptoolpy/esptool.py", line 2632, in slip_reader
+  File "/Users/ken/.platformio/packages/tool-esptoolpy/esptool.py", line 2632, in slip_reader
+    read_bytes = port.read(1 if waiting == 0 else waiting)
+    read_bytes = port.read(1 if waiting == 0 else waiting)
+  File "/opt/homebrew/Cellar/platformio/6.1.19_2/libexec/lib/python3.14/site-packages/serial/serialposix.py", line 595, in read
+  File "/opt/homebrew/Cellar/platformio/6.1.19_2/libexec/lib/python3.14/site-packages/serial/serialposix.py", line 595, in read
+    raise SerialException(
+    raise SerialException(
+        'device reports readiness to read but returned no data '
+        'device reports readiness to read but returned no data '
+        '(device disconnected or multiple access on port?)')
+        '(device disconnected or multiple access on port?)')
+serial.serialutil.SerialException: device reports readiness to read but returned no data (device disconnected or multiple access on port?)
+serial.serialutil.SerialException: device reports readiness to read but returned no data (device disconnected or multiple access on port?)
+*** [uploadfs] Error 1
+*** [uploadfs] Error 1
+================================================== [FAILED] Took 26.67 seconds ==================================================
+================================================== [FAILED] Took 26.67 seconds ==================================================
