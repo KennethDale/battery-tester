@@ -144,11 +144,12 @@ def _print_channel_table(channels) -> None:
     table.add_column("Est. final", justify="right")
     table.add_column("Elapsed", justify="right")
     for ch in channels:
-        est = (
-            f"~{ch.estimated_capacity_mah:.0f} mAh"
-            if ch.estimated_capacity_mah is not None
-            else "—"
-        )
+        if ch.estimated_capacity_mah is not None:
+            est = f"~{ch.estimated_capacity_mah:.0f} mAh"
+            if ch.estimated_capacity_wh is not None:
+                est += f" · ~{ch.estimated_capacity_wh:.2f} Wh"
+        else:
+            est = "—"
         table.add_row(
             str(ch.channel),
             ch.state,

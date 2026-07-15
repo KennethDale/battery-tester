@@ -97,6 +97,14 @@
       margin-top: -0.25rem;
       margin-bottom: 0.25rem;
     }
+    .estimate {
+      font-size: 0.8rem;
+      color: var(--accent);
+      text-align: center;
+      margin-bottom: 0.5rem;
+      min-height: 1.1em;
+    }
+    .estimate[hidden] { display: none; }
     .metric { display: flex; justify-content: space-between; font-size: 0.9rem; }
     .metric .label { color: var(--muted); }
     .meter {
@@ -324,6 +332,8 @@
         </div>
         <div class="capacity" data-cap>— <span class="unit">mAh</span></div>
         <div class="wh" data-wh>— Wh</div>
+        <div class="estimate" data-estimate hidden
+             title="Predicted final capacity/energy from the start voltage (±~7% typical). Not a measurement."></div>
         <div class="meter"><div data-fill></div></div>
         <div class="metric"><span class="label">Voltage</span><span data-v>— V</span></div>
         <div class="metric"><span class="label">Current</span><span data-a>— A</span></div>
@@ -344,6 +354,7 @@
         interrupted: root.querySelector('[data-interrupted]'),
         cap: root.querySelector('[data-cap]'),
         wh: root.querySelector('[data-wh]'),
+        estimate: root.querySelector('[data-estimate]'),
         fill: root.querySelector('[data-fill]'),
         v: root.querySelector('[data-v]'),
         a: root.querySelector('[data-a]'),
@@ -400,6 +411,7 @@
       if (!isConnected) {
         c.cap.innerHTML = '— <span class="unit">mAh</span>';
         c.wh.textContent = '— Wh';
+        c.estimate.hidden = true;
         c.v.textContent = '— V';
         c.a.textContent = '— A';
         c.time.textContent = '—';
@@ -413,6 +425,17 @@
       const wh = ch.capacity_wh || 0;
       c.cap.innerHTML = `${Math.round(mah)} <span class="unit">mAh</span>`;
       c.wh.textContent = `${wh.toFixed(2)} Wh`;
+      // Early prediction of the final capacity/energy from the start voltage.
+      // null (out of calibrated band) or absent -> hide the row.
+      const estMah = ch.estimated_capacity_mah;
+      if (estMah == null) {
+        c.estimate.hidden = true;
+      } else {
+        const estWh = ch.estimated_capacity_wh;
+        c.estimate.hidden = false;
+        c.estimate.textContent = `est. final ~${Math.round(estMah)} mAh`
+          + (estWh == null ? '' : ` · ~${estWh.toFixed(2)} Wh`);
+      }
       c.v.textContent = (ch.voltage == null ? '—' : ch.voltage.toFixed(3)) + ' V';
       c.a.textContent = (ch.current == null ? '—' : ch.current.toFixed(3)) + ' A';
       c.time.textContent = fmtTime(ch.elapsed_s);

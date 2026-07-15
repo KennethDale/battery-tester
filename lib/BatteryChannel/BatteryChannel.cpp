@@ -289,6 +289,9 @@ void BatteryChannel::serializeLatest(String& out) const {
                                    : String("null");
     out += ",\"capacity_wh\":";
     out += String(_capacityWh, 3);
+    out += ",\"estimated_capacity_wh\":";
+    out += capacityEstimateValid() ? String(estimatedFinalEnergyWh(), 3)
+                                   : String("null");
     out += ",\"elapsed_s\":";
     out += _elapsedMs / 1000UL;
     out += ",\"seconds_since_reset\":";

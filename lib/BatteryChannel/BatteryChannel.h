@@ -112,6 +112,14 @@ public:
                     CAPACITY_ESTIMATE_INTERCEPT_MAH;
         return est > 0.0f ? est : 0.0f;
     }
+    // Early estimate of the final delivered energy (Wh) from the start voltage.
+    // Returns 0 when capacityEstimateValid() is false. See config.h.
+    float estimatedFinalEnergyWh() const {
+        if (!capacityEstimateValid()) return 0.0f;
+        float est = ENERGY_ESTIMATE_SLOPE_WH_PER_V * _startVoltage +
+                    ENERGY_ESTIMATE_INTERCEPT_WH;
+        return est > 0.0f ? est : 0.0f;
+    }
 
     // Serialize the latest sample as a JSON object into `out`.
     void serializeLatest(String& out) const;

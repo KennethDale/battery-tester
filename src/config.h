@@ -104,6 +104,14 @@
 #ifndef CAPACITY_ESTIMATE_INTERCEPT_MAH
 #define CAPACITY_ESTIMATE_INTERCEPT_MAH (-3486.5f)
 #endif
+// Energy estimate uses the same V0 model: final_Wh ~= SLOPE * V0 + INTERCEPT
+// (LOOCV median error ~7%, same 13 runs).
+#ifndef ENERGY_ESTIMATE_SLOPE_WH_PER_V
+#define ENERGY_ESTIMATE_SLOPE_WH_PER_V 4.1342f
+#endif
+#ifndef ENERGY_ESTIMATE_INTERCEPT_WH
+#define ENERGY_ESTIMATE_INTERCEPT_WH (-11.8516f)
+#endif
 #ifndef CAPACITY_ESTIMATE_V0_MIN
 #define CAPACITY_ESTIMATE_V0_MIN 3.0f
 #endif
