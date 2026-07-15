@@ -23,9 +23,13 @@ class ChannelStatus:
     current: float
     capacity_mah: float
     elapsed_s: int
+    # Early prediction of final capacity from the start voltage; None until a
+    # test is running with V0 inside the firmware's calibrated band.
+    estimated_capacity_mah: Optional[float] = None
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "ChannelStatus":
+        est = d.get("estimated_capacity_mah")
         return cls(
             channel=int(d.get("channel", -1)),
             state=str(d.get("state", "unknown")),
@@ -34,6 +38,7 @@ class ChannelStatus:
             current=float(d.get("current", 0.0)),
             capacity_mah=float(d.get("capacity_mah", 0.0)),
             elapsed_s=int(d.get("elapsed_s", 0)),
+            estimated_capacity_mah=float(est) if est is not None else None,
         )
 
 

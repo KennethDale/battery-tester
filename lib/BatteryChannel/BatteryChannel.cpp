@@ -37,6 +37,7 @@ bool BatteryChannel::begin() {
     _voltageBeforeDip = 0.0f;
     _lowVoltageSinceMs = 0;
     _interrupted = false;
+    _startVoltage = 0.0f;
     _historyBaseMah = 0.0f;
     _historyCount = 0;
     _historyHead = 0;
@@ -71,7 +72,7 @@ void BatteryChannel::pushSample(float v, float a) {
 void BatteryChannel::integrateCapacity(float a, float v, float dtSec) {
     // Current magnitude in amps (positive or negative shunt orientation).
     float amps = (a > 0.0f) ? a : -a;
-    _capacityMahAccum += amps * 1000.0f * (dtSec / 3600.0f);
+    _capacityMahAccum += capacityIncrementMah(amps, dtSec);
     _capacityWh += amps * v * (dtSec / 3600.0f);
 }
 
@@ -97,6 +98,7 @@ void BatteryChannel::reset() {
     _debounceCount = 0;
     _voltageBeforeDip = 0.0f;
     _interrupted = false;
+    _startVoltage = 0.0f;
     // History is intentionally preserved across reset.
 }
 
@@ -114,6 +116,7 @@ void BatteryChannel::startTest(unsigned long now, float v) {
     _debounceCount = 0;
     _voltageBeforeDip = v;
     _interrupted = false;
+    _startVoltage = v;
     _historyBaseMah = 0.0f;
     _historyCount = 0;
     _historyHead = 0;
@@ -122,6 +125,7 @@ void BatteryChannel::startTest(unsigned long now, float v) {
 void BatteryChannel::captureSnapshot(ChannelSnapshot& out) const {
     out.capacityMah = _capacityMahAccum;
     out.capacityWh = _capacityWh;
+    out.startVoltage = _startVoltage;
     out.elapsedMs = _elapsedMs;
     out.sinceResetMs = _sinceResetMs;
     out.state = static_cast<uint8_t>(_state);
@@ -139,6 +143,7 @@ bool BatteryChannel::restoreSnapshot(const ChannelSnapshot& s) {
     _state = st;
     _capacityMahAccum = s.capacityMah;
     _capacityWh = s.capacityWh;
+    _startVoltage = s.startVoltage;
     _elapsedMs = s.elapsedMs;
     _sinceResetMs = s.sinceResetMs;
     _interrupted = s.interrupted != 0;
@@ -279,6 +284,9 @@ void BatteryChannel::serializeLatest(String& out) const {
     out += (_state == ChannelState::WAITING) ? "null" : String(_lastCurrent, 3);
     out += ",\"capacity_mah\":";
     out += capacityMah();
+    out += ",\"estimated_capacity_mah\":";
+    out += capacityEstimateValid() ? String(static_cast<uint32_t>(estimatedFinalCapacityMah() + 0.5f))
+                                   : String("null");
     out += ",\"capacity_wh\":";
     out += String(_capacityWh, 3);
     out += ",\"elapsed_s\":";
@@ -304,7 +312,7 @@ bool BatteryChannel::serializeHistoryCsvChunk(String& out, CsvCursor& cur, size_
         if (i > 0) {
             float dt = static_cast<float>(_timeHistory[i] - _timeHistory[i - 1]);
             float amps = _currentHistory[i] / 1000.0f;
-            cur.capMah += fabsf(amps) * 1000.0f * (dt / 3600.0f);
+            cur.capMah += capacityIncrementMah(fabsf(amps), dt);
         }
         out += String(_resetTimeHistory[i]);
         out += ',';

@@ -21,6 +21,7 @@ const char* channelStateToString(ChannelState s);
 struct ChannelSnapshot {
     float capacityMah;
     float capacityWh;
+    float startVoltage;   // pack voltage at test start (feeds the capacity estimate)
     uint32_t elapsedMs;
     uint32_t sinceResetMs;
     uint8_t state;
@@ -51,6 +52,15 @@ public:
     };
 
     BatteryChannel(uint8_t index, uint8_t i2cAddress);
+
+    // mAh added by drawing `amps` amps for `dtSec` seconds. Single source of
+    // truth for the coulomb-counting scale, shared by live integration and the
+    // history-CSV reconstruction so the two paths can never drift apart (the
+    // old firmware's 1000x capacity bug came from duplicating this math and
+    // fixing only one copy). Guarded by the static_assert below.
+    static constexpr float capacityIncrementMah(float amps, float dtSec) {
+        return amps * 1000.0f * (dtSec / 3600.0f);  // A -> mA, s -> h
+    }
 
     // Initialize the INA219. Returns false if the sensor wasn't found.
     bool begin();
@@ -84,6 +94,24 @@ public:
     // True if the battery was already connected when the device booted, so
     // part of the discharge was never measured.
     bool interrupted() const { return _interrupted; }
+    // Pack voltage captured at test start (0 while WAITING).
+    float startVoltage() const { return _startVoltage; }
+    // True when startVoltage() is inside the estimator's calibrated band, i.e.
+    // estimatedFinalCapacityMah() is meaningful.
+    bool capacityEstimateValid() const {
+        return (_state == ChannelState::LOGGING || _state == ChannelState::LOW_VOLTAGE) &&
+               _startVoltage >= CAPACITY_ESTIMATE_V0_MIN &&
+               _startVoltage <= CAPACITY_ESTIMATE_V0_MAX;
+    }
+    // Early estimate of the final delivered capacity (mAh) from the start
+    // voltage. Returns 0 when capacityEstimateValid() is false. Not measured
+    // capacity -- see config.h for the calibration and its ~7% median error.
+    float estimatedFinalCapacityMah() const {
+        if (!capacityEstimateValid()) return 0.0f;
+        float est = CAPACITY_ESTIMATE_SLOPE_MAH_PER_V * _startVoltage +
+                    CAPACITY_ESTIMATE_INTERCEPT_MAH;
+        return est > 0.0f ? est : 0.0f;
+    }
 
     // Serialize the latest sample as a JSON object into `out`.
     void serializeLatest(String& out) const;
@@ -116,6 +144,7 @@ private:
     float _voltageBeforeDip = 0.0f;       // Last healthy voltage before LOW_VOLTAGE
     unsigned long _lowVoltageSinceMs = 0; // When LOW_VOLTAGE was entered
     bool _interrupted = false;
+    float _startVoltage = 0.0f;           // Pack voltage at test start (for the estimate)
     float _historyBaseMah = 0.0f;    // Capacity already accumulated before the
                                      // oldest history entry (set on restore)
 
@@ -132,5 +161,11 @@ private:
     void pushSample(float v, float a);
     void integrateCapacity(float a, float v, float dtSec);
 };
+
+// Coulomb-counting scale guard: 1 A drawn for 1 hour must be exactly 1000 mAh.
+// Fails the build if capacityIncrementMah's units ever regress.
+static_assert(BatteryChannel::capacityIncrementMah(1.0f, 3600.0f) > 999.99f &&
+              BatteryChannel::capacityIncrementMah(1.0f, 3600.0f) < 1000.01f,
+              "capacity integration scaling is wrong: 1A for 1h must be 1000 mAh");
 
 #endif  // BATTERY_TESTER_BATTERY_CHANNEL_H

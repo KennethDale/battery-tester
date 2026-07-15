@@ -47,7 +47,7 @@ static_assert(sizeof(RtcSnapshot) % 4 == 0, "RTC writes need 4-byte multiples");
 static_assert(sizeof(RtcSnapshot) <= 512, "RTC user memory is 512 bytes");
 
 static const uint32_t RTC_MAGIC = 0x42544C47;  // "BTLG"
-static const uint16_t RTC_VERSION = 1;
+static const uint16_t RTC_VERSION = 2;  // v2 adds ChannelSnapshot::startVoltage
 static RtcSnapshot rtcSnap;
 
 static void saveRtcSnapshot() {

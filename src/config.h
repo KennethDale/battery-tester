@@ -89,6 +89,28 @@
 #define BOOT_CONNECT_GRACE_MS 15000UL
 #endif
 
+// --- Early final-capacity estimate -----------------------------------------
+// Predict the final delivered capacity (mAh) from the pack voltage at the very
+// start of the discharge: final_mAh ~= SLOPE * V0 + INTERCEPT. Fit by
+// leave-one-out cross-validation over the 13 clean runs in results/ (see
+// results/capacity_estimator.py); median error ~7%. Because these cells have a
+// flat voltage plateau under constant-current load, the first minutes of the
+// curve add no information over V0 alone, so the estimate is available as soon
+// as a test starts. It is only trustworthy while V0 sits in the calibrated
+// band [V0_MIN, V0_MAX]; outside it the estimate is reported as invalid.
+#ifndef CAPACITY_ESTIMATE_SLOPE_MAH_PER_V
+#define CAPACITY_ESTIMATE_SLOPE_MAH_PER_V 1228.6f
+#endif
+#ifndef CAPACITY_ESTIMATE_INTERCEPT_MAH
+#define CAPACITY_ESTIMATE_INTERCEPT_MAH (-3486.5f)
+#endif
+#ifndef CAPACITY_ESTIMATE_V0_MIN
+#define CAPACITY_ESTIMATE_V0_MIN 3.0f
+#endif
+#ifndef CAPACITY_ESTIMATE_V0_MAX
+#define CAPACITY_ESTIMATE_V0_MAX 3.6f
+#endif
+
 // Web server port
 #ifndef WEB_SERVER_PORT
 #define WEB_SERVER_PORT 80

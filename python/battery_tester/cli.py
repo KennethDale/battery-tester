@@ -141,8 +141,14 @@ def _print_channel_table(channels) -> None:
     table.add_column("Voltage", justify="right")
     table.add_column("Current", justify="right")
     table.add_column("Capacity", justify="right")
+    table.add_column("Est. final", justify="right")
     table.add_column("Elapsed", justify="right")
     for ch in channels:
+        est = (
+            f"~{ch.estimated_capacity_mah:.0f} mAh"
+            if ch.estimated_capacity_mah is not None
+            else "—"
+        )
         table.add_row(
             str(ch.channel),
             ch.state,
@@ -150,6 +156,7 @@ def _print_channel_table(channels) -> None:
             f"{ch.voltage:.3f} V",
             f"{ch.current:.3f} A",
             f"{ch.capacity_mah:.0f} mAh",
+            est,
             _fmt_time(ch.elapsed_s),
         )
     console.print(table)
