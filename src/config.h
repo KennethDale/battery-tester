@@ -14,9 +14,21 @@
 #define BAUD_RATE 115200
 #endif
 
-// How often to sample each channel and write a log entry (milliseconds)
-#ifndef LOG_INTERVAL_MS
-#define LOG_INTERVAL_MS 5000
+// How often to sample each channel (milliseconds). The firmware samples the
+// INA219 every second and decides whether to push a history entry based on
+// voltage change or a maximum quiet period.
+#ifndef SAMPLE_INTERVAL_MS
+#define SAMPLE_INTERVAL_MS 1000
+#endif
+
+// Minimum voltage change (volts) that triggers a new history entry.
+#ifndef LOG_VOLTAGE_DELTA_V
+#define LOG_VOLTAGE_DELTA_V 0.05f
+#endif
+
+// Maximum time between history entries when the voltage is stable (ms).
+#ifndef LOG_MAX_QUIET_MS
+#define LOG_MAX_QUIET_MS 60000
 #endif
 
 // --- INA219 I2C addresses --------------------------------------------------
@@ -50,15 +62,48 @@
 #define DISCONNECT_THRESHOLD_V 2.0f
 #endif
 
+// Consecutive samples required past a threshold before a state transition.
+// Filters single-sample noise/contact bounce so one glitched reading can't
+// start, stop, or wipe a test.
+#ifndef DEBOUNCE_SAMPLES
+#define DEBOUNCE_SAMPLES 3
+#endif
+
+// If the voltage recovers after the channel has sat in LOW_VOLTAGE longer
+// than this, assume a fresh battery was connected and start a new test
+// instead of adding to the previous battery's totals.
+#ifndef LOW_VOLTAGE_NEW_TEST_MS
+#define LOW_VOLTAGE_NEW_TEST_MS 600000UL
+#endif
+
+// A reconnect voltage this far above the last healthy voltage also counts
+// as a fresh battery (e.g. 4.1V after a cell that sagged to 3.0V).
+#ifndef NEW_TEST_VOLTAGE_JUMP_V
+#define NEW_TEST_VOLTAGE_JUMP_V 0.8f
+#endif
+
+// A battery detected within this long after boot was connected before the
+// device started (e.g. power loss mid-test): flag the test "interrupted"
+// so its capacity total isn't trusted blindly.
+#ifndef BOOT_CONNECT_GRACE_MS
+#define BOOT_CONNECT_GRACE_MS 15000UL
+#endif
+
 // Web server port
 #ifndef WEB_SERVER_PORT
 #define WEB_SERVER_PORT 80
 #endif
 
-// Max history samples per channel (kept in RAM). At 5s intervals this is
-// ~5.5 minutes; reduced from 600 to save RAM when running 8 channels.
+// Max history samples per channel (kept in RAM). 300 samples is sized for
+// ~1.25 hours of change-driven logging. The first 60 slots preserve the
+// initial 15 minutes; the remaining 240 slots form a ring for recent samples.
 #ifndef HISTORY_LENGTH
-#define HISTORY_LENGTH 400
+#define HISTORY_LENGTH 300
+#endif
+
+// Number of initial history slots reserved for the start of the test.
+#ifndef HISTORY_PRESERVE_SLOTS
+#define HISTORY_PRESERVE_SLOTS 60
 #endif
 
 #endif  // BATTERY_TESTER_CONFIG_H

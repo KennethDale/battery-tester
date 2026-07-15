@@ -1,0 +1,40 @@
+# Repo-local Cline rules
+# ESP-IDF overlay for this repository
+# Inherits the global spirit, but specializes for firmware work.
+
+## Framework defaults
+- Default to ESP-IDF C unless this repository clearly uses C++ or another framework.
+- Follow official ESP-IDF project structure and conventions.
+- Prefer adapting official Espressif examples and idioms over inventing custom architecture.
+- Keep CMakeLists.txt and component structure minimal and idiomatic.
+
+## Build and config
+- Use idf.py workflows by default: set-target, menuconfig, build, flash, monitor.
+- Prefer Kconfig, sdkconfig.defaults, and config headers over hard-coded tunables.
+- Do not hard-code Wi-Fi credentials, pins, addresses, keys, calibration values, or environment-specific settings unless the repo already does.
+- When suggesting commands, include the exact idf.py command sequence relevant to the task.
+
+## Firmware design
+- Prefer event-driven design and FreeRTOS primitives over polling and busy-wait loops.
+- Use esp_err_t return values and handle errors explicitly.
+- Prefer ESP_ERROR_CHECK when appropriate; use explicit handling when recovery matters.
+- Use ESP_LOGI/W/E/D instead of printf unless there is a specific reason not to.
+- Avoid dynamic allocation in steady-state or time-critical paths unless justified.
+- Prefer small, example-like implementations that compile cleanly over deep abstraction.
+
+## Hardware awareness
+- State target assumptions explicitly: esp32, esp32-s3, esp32-c3, etc.
+- Flag GPIO caveats before recommending pins: strapping pins, input-only pins, ADC limitations, USB/JTAG pins, flash/PSRAM conflicts.
+- Ask for exact board/chip when peripherals, PSRAM, USB, flash size, or pin mapping matter.
+- Mention power, sleep, and watchdog implications when relevant.
+
+## Debug and diagnostics
+- For bugs, start with the smallest reproducible check.
+- Prefer reproducible debug steps: clean build, monitor logs, reset reason, panic output, decoded backtrace, heap/task stats.
+- Preserve logs and register values exactly.
+- When proposing fixes, include how to verify them on-device.
+
+## Scope control
+- Do not convert working simple firmware into elaborate abstraction layers without a clear reason.
+- Favor readability, determinism, and field-debuggability over architectural purity.
+- Keep tasks, queues, ISR interactions, and concurrency easy to trace.

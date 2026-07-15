@@ -15,6 +15,7 @@
 #include <Wire.h>
 #include <LittleFS.h>
 #include <ESP8266mDNS.h>
+#include <coredecls.h>  // crc32()
 
 #include "config.h"
 #include "BatteryChannel.h"
@@ -30,7 +31,68 @@ static const uint8_t INA_ADDRESSES[NUM_CHANNELS] = INA219_ADDRESSES;
 BatteryChannel* channels = nullptr;
 BatteryWebServer* webServer = nullptr;
 
+// --- RTC snapshot ------------------------------------------------------------
+// Channel state is mirrored into RTC user memory once per sample tick so an
+// in-progress test survives a crash or watchdog reset. RTC memory is cleared
+// by power loss; in that case channels that find a battery already connected
+// at boot flag their test "interrupted" instead (see BatteryChannel::update).
+struct RtcSnapshot {
+    uint32_t magic;
+    uint16_t version;
+    uint16_t numChannels;
+    ChannelSnapshot ch[NUM_CHANNELS];
+    uint32_t crc;
+};
+static_assert(sizeof(RtcSnapshot) % 4 == 0, "RTC writes need 4-byte multiples");
+static_assert(sizeof(RtcSnapshot) <= 512, "RTC user memory is 512 bytes");
+
+static const uint32_t RTC_MAGIC = 0x42544C47;  // "BTLG"
+static const uint16_t RTC_VERSION = 1;
+static RtcSnapshot rtcSnap;
+
+static void saveRtcSnapshot() {
+    rtcSnap.magic = RTC_MAGIC;
+    rtcSnap.version = RTC_VERSION;
+    rtcSnap.numChannels = NUM_CHANNELS;
+    for (uint8_t i = 0; i < NUM_CHANNELS; ++i) {
+        channels[i].captureSnapshot(rtcSnap.ch[i]);
+    }
+    rtcSnap.crc = crc32(&rtcSnap, sizeof(rtcSnap) - sizeof(rtcSnap.crc));
+    ESP.rtcUserMemoryWrite(0, reinterpret_cast<uint32_t*>(&rtcSnap), sizeof(rtcSnap));
+}
+
+static void restoreRtcSnapshot() {
+    if (!ESP.rtcUserMemoryRead(0, reinterpret_cast<uint32_t*>(&rtcSnap), sizeof(rtcSnap))) {
+        return;
+    }
+    if (rtcSnap.magic != RTC_MAGIC || rtcSnap.version != RTC_VERSION ||
+        rtcSnap.numChannels != NUM_CHANNELS ||
+        rtcSnap.crc != crc32(&rtcSnap, sizeof(rtcSnap) - sizeof(rtcSnap.crc))) {
+        Serial.println(F("[boot] no valid RTC snapshot (cold boot)"));
+        return;
+    }
+    uint8_t restored = 0;
+    for (uint8_t i = 0; i < NUM_CHANNELS; ++i) {
+        if (channels[i].restoreSnapshot(rtcSnap.ch[i])) ++restored;
+    }
+    Serial.printf("[boot] restored %u in-progress test(s) from RTC memory\n", restored);
+}
+
 // --- Helpers ---------------------------------------------------------------
+static void scanI2C() {
+    Serial.println(F("[i2c] scanning bus..."));
+    uint8_t found = 0;
+    for (uint8_t addr = 1; addr < 127; ++addr) {
+        Wire.beginTransmission(addr);
+        uint8_t err = Wire.endTransmission();
+        if (err == 0) {
+            Serial.printf("[i2c] device found at 0x%02X\n", addr);
+            ++found;
+        }
+    }
+    Serial.printf("[i2c] scan complete, %u device(s) found\n", found);
+}
+
 static BatteryChannel* makeChannels(const uint8_t addresses[], uint8_t count) {
     // Allocate raw storage, then construct each channel in place.
     void* mem = ::operator new[](sizeof(BatteryChannel) * count);
@@ -51,6 +113,7 @@ void setup() {
     // I2C for the INA219 sensors
     Wire.begin();
     Serial.println(F("[boot] I2C started"));
+    scanI2C();
 
     // Mount LittleFS (web UI assets)
     if (!LittleFS.begin()) {
@@ -72,6 +135,8 @@ void setup() {
     }
     Serial.printf("[boot] %u/%u INA219 sensors found\n", found, NUM_CHANNELS);
 
+    restoreRtcSnapshot();
+
     connectWifi();
 
     if (MDNS.begin("batterylogger")) {
@@ -89,11 +154,13 @@ void loop() {
     unsigned long now = millis();
 
     // Sample every channel at the configured interval
-    if (now - lastTick >= LOG_INTERVAL_MS) {
+    if (now - lastTick >= SAMPLE_INTERVAL_MS) {
         lastTick = now;
         for (uint8_t i = 0; i < NUM_CHANNELS; ++i) {
             channels[i].update();
         }
+        // Mirror state to RTC memory so tests survive a crash/watchdog reset.
+        saveRtcSnapshot();
     }
 
     webServer->loop();

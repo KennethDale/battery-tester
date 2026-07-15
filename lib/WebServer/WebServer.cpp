@@ -54,7 +54,10 @@ void BatteryWebServer::handleIndex() {
 }
 
 void BatteryWebServer::handleStatus() {
-    String body = "{\"channels\":[";
+    String body;
+    // Pre-size to avoid realloc churn on the fragmented ESP8266 heap.
+    body.reserve(_count * 220 + 16);
+    body += "{\"channels\":[";
     for (uint8_t i = 0; i < _count; ++i) {
         _channels[i].serializeLatest(body);
         if (i < _count - 1) body += ',';
@@ -75,14 +78,35 @@ void BatteryWebServer::handleHistoryCsv() {
     uint8_t idx;
     if (!validateChannelArg(idx)) return;
 
-    String csv;
-    _channels[idx].serializeHistoryCsv(csv);
-
-    char name[32];
-    snprintf(name, sizeof(name), "channel_%u.csv", idx);
+    char name[48];
+    uint32_t now = millis() / 1000UL;
+    uint32_t day = now / 86400UL;
+    uint32_t rem = now % 86400UL;
+    uint32_t hour = rem / 3600UL;
+    rem %= 3600UL;
+    uint32_t minute = rem / 60UL;
+    uint32_t second = rem % 60UL;
+    snprintf(name, sizeof(name), "channel_%u_%lu_%02lu%02lu%02lu.csv",
+             idx, day, hour, minute, second);
     _server.sendHeader("Content-Disposition", String("attachment; filename=\"") + name + "\"");
     _server.sendHeader("Cache-Control", "no-store");
-    _server.send(200, "text/csv", csv);
+
+    // Stream the CSV in small chunks instead of building one ~9KB String,
+    // which can exhaust the fragmented ESP8266 heap and crash mid-test.
+    _server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+    _server.send(200, "text/csv", "");
+
+    String chunk;
+    chunk.reserve(1600);
+    BatteryChannel::CsvCursor cur;
+    bool more = true;
+    while (more) {
+        chunk = "";
+        more = _channels[idx].serializeHistoryCsvChunk(chunk, cur, 32);
+        if (chunk.length()) _server.sendContent(chunk);
+        yield();
+    }
+    _server.sendContent("");  // terminate chunked response
 }
 
 void BatteryWebServer::handleReset() {
@@ -95,13 +119,16 @@ void BatteryWebServer::handleReset() {
 }
 
 void BatteryWebServer::handleInfo() {
-    char body[256];
+    char body[384];
     snprintf(body, sizeof(body),
-             "{\"firmware\":\"0.2.0\",\"chip_id\":\"0x%06X\",\"uptime_s\":%lu,\"channels\":%u,\"log_interval_s\":%u}",
+             "{\"firmware\":\"0.3.0\",\"chip_id\":\"0x%06X\",\"uptime_s\":%lu,\"channels\":%u,\"sample_interval_s\":%u,\"log_voltage_delta_v\":%.2f,\"log_max_quiet_s\":%u,\"history_length\":%u}",
              ESP.getChipId(),
              millis() / 1000UL,
              _count,
-             LOG_INTERVAL_MS / 1000U);
+             SAMPLE_INTERVAL_MS / 1000U,
+             LOG_VOLTAGE_DELTA_V,
+             LOG_MAX_QUIET_MS / 1000U,
+             HISTORY_LENGTH);
     sendJson(200, body);
 }
 
